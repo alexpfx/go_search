@@ -2,11 +2,10 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"github.com/urfave/cli/v2"
-	"golang.org/x/sync/errgroup"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,51 +13,111 @@ import (
 )
 
 func main() {
-	app := cli.App{
+	app := &cli.App{
+		HideHelpCommand: true,
+		Name:  "go_search",
+		Usage: "buscador de texto em arquivos",
+		ArgsUsage: "<query_string>",
+
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name: "directory",
+				Aliases: []string{"d"},
+				Usage: "diretório raíz de onde a busca deve partir",
+				Value: "./",
+			},
+		},
+		HelpName: "go_search",
 		Action: func(c *cli.Context) error {
 			nargs := c.NArg()
 			if nargs < 1 {
 				_ = cli.ShowAppHelp(c)
 				return nil
 			}
-			query := c.Args().Get(nargs - 1)
-			root := "./"
+			query := strings.Join(c.Args().Slice(), " ")
+			root := c.String("directory")
 
-			if nargs > 1 {
-				root = c.Args().Get(0)
-			}
-
-			ctx, cf := context.WithTimeout(context.Background(), time.Second*120)
-			defer cf()
-
+			fmt.Println("root: ", root)
+			fmt.Println("query: ", query)
 			start := time.Now()
-			_, err := search(ctx, root, query)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("%s\n", time.Since(start))
 
+			ch := filter(root)
+			out := search(ch, query)
+
+			for r := range out {
+				fmt.Println(r)
+			}
+
+			fmt.Printf("%s\n", time.Since(start))
 			return nil
 		},
 	}
 
 	err := app.Run(os.Args)
 	if err != nil {
-		fmt.Println(err.Error())
+		log.Fatal(err)
 	}
 
 }
 
-func search(context context.Context, root string, query string) ([]string, error) {
+func search(in <-chan string, query string) <-chan string {
+	out := make(chan string)
 
+	go func() {
+		for path := range in {
+			file, err := os.Open(path)
+			if err != nil {
+				log.Println("não pode abrir arquivo " + path)
+				continue
+			}
 
-	group, cx := errgroup.WithContext(context)
+			scanner := bufio.NewScanner(file)
+			for scanner.Scan() {
+				text := scanner.Text()
 
-	chanPath := make(chan string)
+				if !strings.Contains(text, query) {
+					continue
+				}
+				out <- path + "\n" + "->" + text
+			}
+			_ = file.Close()
+		}
+		close(out)
+	}()
 
-	group.Go(func() error {
-		defer close(chanPath)
-		return filepath.Walk(root, func(path string, info fs.FileInfo, err error) error {
+	return out
+}
+
+/*
+func walk(root string) chan string {
+
+	var wg sync.WaitGroup
+
+	_ = filepath.WalkDir(root, func(path string, info fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+		if !info.Type().IsRegular() {
+			return nil
+		}
+		wg.Add(1)
+
+		return nil
+	})
+
+	return nil
+
+}
+ */
+
+func filter(root string) chan string {
+	out := make(chan string)
+	go func() {
+		_ = filepath.Walk(root, func(path string, info fs.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
@@ -67,56 +126,10 @@ func search(context context.Context, root string, query string) ([]string, error
 				return nil
 			}
 
-			select {
-			case chanPath <- path:
-			case <-cx.Done():
-				return cx.Err()
-			}
-
+			out <- path
 			return nil
 		})
-	})
-
-	chanSearch := make(chan string, 4)
-	for path := range chanPath {
-		p := path
-		group.Go(func() error {
-			file, err := os.Open(p)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			scanner := bufio.NewScanner(file)
-
-			for scanner.Scan() {
-				text := scanner.Text()
-				if !strings.Contains(text, query) {
-					continue
-				}
-
-				select {
-				case chanSearch <- fmt.Sprintf(" %s --> %s", text, p):
-				case <-cx.Done():
-					return cx.Err()
-				}
-			}
-
-			return scanner.Err()
-		})
-
-	}
-
-	go func() {
-		group.Wait()
-		close(chanSearch)
+		close(out)
 	}()
-
-	var res []string
-	for r := range chanSearch {
-		fmt.Println(r)
-		res = append(res, r)
-	}
-	return res, group.Wait()
-
+	return out
 }
