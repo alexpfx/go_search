@@ -1,10 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"github.com/urfave/cli/v2"
+	"index/suffixarray"
 	"io/fs"
+	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -76,34 +77,56 @@ func main() {
 
 }
 
-func search(in <-chan string, query string) <-chan string {
-	out := make(chan string, 8)
+func search(in <-chan summary, query string) <-chan string {
+	out := make(chan string, 4)
 
 	go func() {
-		for path := range in {
+		for summary := range in {
+			if summary.size < 1024*4 {
+				small := searchSmall(summary, []byte(query))
 
-			file, err := os.Open(path)
-			if err != nil {
-				continue
+				if small != ""{
+					out <- small
+				}
 			}
 
-			reader := bufio.NewReader(file)
+			/*
+				if bytes.Index(bs, []byte(query)) == -1 {
+					continue
+				}
+			*/
 
-			for {
-
-				text, err := reader.ReadString('\n')
+			/*
+				file, err := os.Open(summary)
 				if err != nil {
-					break
+					fmt.Println(err)
+					continue
 				}
 
-				if !strings.Contains(text, query) {
-					break
+				reader := bufio.NewReader(file)
+
+				for {
+
+
+					b, _, err := reader.ReadLine()
+					//	fmt.Println(text)
+					text := string(b)
+
+					if err != nil {
+						break
+					}
+
+
+					if strings.Contains(text, query) {
+						out <- summary + "\n" + "->" + text
+					}
+					if err == io.EOF {
+						break
+					}
+
 				}
-
-				out <- path + "\n" + "->" + text
-
-			}
-			_ = file.Close()
+				_ = file.Close()
+			*/
 		}
 
 		close(out)
@@ -112,10 +135,70 @@ func search(in <-chan string, query string) <-chan string {
 	return out
 }
 
-func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
-	out := make(chan string, 4)
+func searchSmall(summary summary, query []byte) string {
+	bs, err := ioutil.ReadFile(summary.path)
+	qLen := len(query)
+	if err != nil {
+		return ""
+	}
+
+	index := suffixarray.New(bs)
+
+	lkpRes := index.Lookup(query, -1)
+	if lkpRes == nil {
+		return ""
+	}
+
+	sb := strings.Builder{}
+	sb.WriteString(summary.path + "\n")
+
+	for _, ix := range lkpRes {
+		i := ix
+		j := ix
+		for {
+			foundLeft := bs[i] == '\n' || i == 0
+			if !foundLeft {
+				i--
+			}
+			foundRight := bs[j] == '\n' || j == qLen
+			if !foundRight {
+				j++
+			}
+
+			if foundLeft && foundRight {
+				break
+			}
+		}
+		sb.Write(bs[i+1 : j-1])
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+type summary struct {
+	path string
+	size int64
+}
+
+func filter(root string, all bool, incRegex *regexp.Regexp) chan summary {
+	out := make(chan summary, 4)
 
 	go func() {
+
 		_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -133,11 +216,24 @@ func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
 				return nil
 			}
 
+			if !entry.Type().IsRegular() {
+				return nil
+			}
+
 			if incRegex != nil && !incRegex.MatchString(entry.Name()) {
 				return nil
 			}
 
-			out <- path
+			info, err := entry.Info()
+			if err != nil {
+				fmt.Println("erro " + err.Error())
+				return nil
+			}
+
+			out <- summary{
+				path: path,
+				size: info.Size(),
+			}
 
 			return nil
 		})
