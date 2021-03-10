@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -15,16 +16,27 @@ import (
 func main() {
 	app := &cli.App{
 		HideHelpCommand: true,
-		Name:  "go_search",
-		Usage: "buscador de texto em arquivos",
-		ArgsUsage: "<query_string>",
+		Name:            "go_search",
+		Usage:           "buscador de texto em arquivos",
+		ArgsUsage:       "<query_string>",
 
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name: "directory",
+				Name:    "directory",
 				Aliases: []string{"d"},
-				Usage: "diretório raíz de onde a busca deve partir",
-				Value: "./",
+				Usage:   "diretório raíz de onde a busca deve partir",
+				Value:   "./",
+			},
+			&cli.BoolFlag{
+				Name:    "all",
+				Aliases: []string{"a"},
+				Usage:   "inclui na busca diretórios invisíveis",
+				Value:   false,
+			},
+			&cli.StringFlag{
+				Name:    "include",
+				Aliases: []string{"i"},
+				Usage:   "include pattern: se especificado irá incluir na busca apenas arquivos que satisfaçam o pattern",
 			},
 		},
 		HelpName: "go_search",
@@ -37,11 +49,15 @@ func main() {
 			query := strings.Join(c.Args().Slice(), " ")
 			root := c.String("directory")
 
-			fmt.Println("root: ", root)
-			fmt.Println("query: ", query)
 			start := time.Now()
 
-			ch := filter(root)
+			var incRegex *regexp.Regexp
+			inc := c.String("include")
+			if inc != "" {
+				incRegex = regexp.MustCompile(inc)
+			}
+
+			ch := filter(root, c.Bool("all"), incRegex)
 			out := search(ch, query)
 
 			for r := range out {
@@ -61,75 +77,83 @@ func main() {
 }
 
 func search(in <-chan string, query string) <-chan string {
-	out := make(chan string)
+	out := make(chan string, 8)
 
 	go func() {
 		for path := range in {
+
 			file, err := os.Open(path)
 			if err != nil {
-				log.Println("não pode abrir arquivo " + path)
 				continue
 			}
 
-			scanner := bufio.NewScanner(file)
-			for scanner.Scan() {
-				text := scanner.Text()
+			reader := bufio.NewReader(file)
+
+			for {
+
+				text, err := reader.ReadString('\n')
+				if err != nil {
+					break
+				}
 
 				if !strings.Contains(text, query) {
-					continue
+					break
 				}
+
 				out <- path + "\n" + "->" + text
+
 			}
 			_ = file.Close()
 		}
+
 		close(out)
 	}()
 
 	return out
 }
 
-/*
-func walk(root string) chan string {
+func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
+	out := make(chan string, 4)
 
-	var wg sync.WaitGroup
-
-	_ = filepath.WalkDir(root, func(path string, info fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if info.IsDir() {
-			return nil
-		}
-		if !info.Type().IsRegular() {
-			return nil
-		}
-		wg.Add(1)
-
-		return nil
-	})
-
-	return nil
-
-}
- */
-
-func filter(root string) chan string {
-	out := make(chan string)
 	go func() {
-		_ = filepath.Walk(root, func(path string, info fs.FileInfo, err error) error {
+		_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
 
-			if info.IsDir() {
+			if path == root {
+				return nil
+			}
+
+			if shouldSkipDir(entry, all) {
+				return fs.SkipDir
+			}
+
+			if entry.IsDir() {
+				return nil
+			}
+
+			if incRegex != nil && !incRegex.MatchString(entry.Name()) {
 				return nil
 			}
 
 			out <- path
+
 			return nil
 		})
 		close(out)
 	}()
+
 	return out
+}
+
+func shouldSkipDir(info fs.DirEntry, all bool) bool {
+	if all {
+		return false
+	}
+	if !info.IsDir() {
+		return false
+	}
+
+	return strings.HasPrefix(info.Name(), ".")
 }
