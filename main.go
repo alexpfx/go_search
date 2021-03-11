@@ -1,12 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"github.com/urfave/cli/v2"
-	"index/suffixarray"
+	"io"
 	"io/fs"
-	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -77,56 +78,36 @@ func main() {
 
 }
 
-func search(in <-chan summary, query string) <-chan string {
+func search(in <-chan string, query string) <-chan string {
 	out := make(chan string, 4)
 
 	go func() {
-		for summary := range in {
-			if summary.size < 1024*4 {
-				small := searchSmall(summary, []byte(query))
-
-				if small != ""{
-					out <- small
-				}
+		for path := range in {
+			file, err := os.Open(path)
+			if err != nil {
+				continue
 			}
 
-			/*
-				if bytes.Index(bs, []byte(query)) == -1 {
-					continue
-				}
-			*/
-
-			/*
-				file, err := os.Open(summary)
-				if err != nil {
-					fmt.Println(err)
-					continue
-				}
-
-				reader := bufio.NewReader(file)
-
-				for {
-
-
-					b, _, err := reader.ReadLine()
-					//	fmt.Println(text)
-					text := string(b)
-
-					if err != nil {
-						break
-					}
-
-
-					if strings.Contains(text, query) {
-						out <- summary + "\n" + "->" + text
-					}
-					if err == io.EOF {
-						break
-					}
-
-				}
+			buff := make([]byte, 512)
+			rd := bufio.NewReader(file)
+			_, err = rd.Read(buff)
+			if err == io.EOF {
 				_ = file.Close()
-			*/
+				fmt.Println(path)
+				continue
+			}
+			contentType := http.DetectContentType(buff)
+			if !strings.HasPrefix(contentType, "text") {
+				_ = file.Close()
+				continue
+			}
+
+			text := searchAll(file, []byte(query))
+
+			if text != "" {
+				out <-
+					fmt.Sprintf("\n\n%s\n    %s\n", path, text)
+			}
 		}
 
 		close(out)
@@ -135,67 +116,28 @@ func search(in <-chan summary, query string) <-chan string {
 	return out
 }
 
-func searchSmall(summary summary, query []byte) string {
-	bs, err := ioutil.ReadFile(summary.path)
-	qLen := len(query)
-	if err != nil {
-		return ""
-	}
+func searchAll(file *os.File, query []byte) string {
+	r := bufio.NewReader(file)
 
-	index := suffixarray.New(bs)
-
-	lkpRes := index.Lookup(query, -1)
-	if lkpRes == nil {
-		return ""
-	}
-
+	scanner := bufio.NewScanner(r)
 	sb := strings.Builder{}
-	sb.WriteString(summary.path + "\n")
+	for scanner.Scan() {
+		text := scanner.Text()
 
-	for _, ix := range lkpRes {
-		i := ix
-		j := ix
-		for {
-			foundLeft := bs[i] == '\n' || i == 0
-			if !foundLeft {
-				i--
-			}
-			foundRight := bs[j] == '\n' || j == qLen
-			if !foundRight {
-				j++
-			}
-
-			if foundLeft && foundRight {
-				break
-			}
+		if !strings.Contains(text, string(query)) {
+			continue
 		}
-		sb.Write(bs[i+1 : j-1])
-		sb.WriteString("\n")
+
+		sb.WriteString("\n  ")
+		sb.WriteString(strings.TrimSpace(text))
+
 	}
+	_ = file.Close()
 	return sb.String()
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-type summary struct {
-	path string
-	size int64
-}
-
-func filter(root string, all bool, incRegex *regexp.Regexp) chan summary {
-	out := make(chan summary, 4)
+func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
+	out := make(chan string, 4)
 
 	go func() {
 
@@ -209,6 +151,7 @@ func filter(root string, all bool, incRegex *regexp.Regexp) chan summary {
 			}
 
 			if shouldSkipDir(entry, all) {
+
 				return fs.SkipDir
 			}
 
@@ -221,19 +164,11 @@ func filter(root string, all bool, incRegex *regexp.Regexp) chan summary {
 			}
 
 			if incRegex != nil && !incRegex.MatchString(entry.Name()) {
+				fmt.Println("not regular")
 				return nil
 			}
 
-			info, err := entry.Info()
-			if err != nil {
-				fmt.Println("erro " + err.Error())
-				return nil
-			}
-
-			out <- summary{
-				path: path,
-				size: info.Size(),
-			}
+			out <- path
 
 			return nil
 		})
