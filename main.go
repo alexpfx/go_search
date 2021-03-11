@@ -15,6 +15,23 @@ import (
 	"time"
 )
 
+var (
+	Black   = "\033[1;30m%s\033[0m"
+	Red     = "\033[1;31m%s\033[0m"
+	Green   = "\033[1;32m%s\033[0m"
+	Yellow  = "\033[1;33m%s\033[0m"
+	Purple  = "\033[1;34m%s\033[0m"
+	Magenta = "\033[1;35m%s\033[0m"
+	Teal    = "\033[1;36m%s\033[0m"
+	White   = "\033[1;37m%s\033[0m"
+
+	InfoColor    = "\033[1;34m%s\033[0m"
+	NoticeColor  = "\033[1;36m%s\033[0m"
+	WarningColor = "\033[1;33m%s\033[0m"
+	ErrorColor   = "\033[1;31m%s\033[0m"
+	DebugColor   = "\033[0;36m%s\033[0m"
+)
+
 func main() {
 	app := &cli.App{
 		HideHelpCommand: true,
@@ -81,6 +98,7 @@ func main() {
 func search(in <-chan string, query string) <-chan string {
 	out := make(chan string, 4)
 
+	color := fmt.Sprintf(Purple, query)
 	go func() {
 		for path := range in {
 			file, err := os.Open(path)
@@ -93,7 +111,6 @@ func search(in <-chan string, query string) <-chan string {
 			_, err = rd.Read(buff)
 			if err == io.EOF {
 				_ = file.Close()
-				fmt.Println(path)
 				continue
 			}
 			contentType := http.DetectContentType(buff)
@@ -102,12 +119,17 @@ func search(in <-chan string, query string) <-chan string {
 				continue
 			}
 
-			text := searchAll(file, []byte(query))
+			tokens := searchAll(file, query)
 
-			if text != "" {
-				out <-
-					fmt.Sprintf("\n\n%s\n    %s\n", path, text)
+			if len(tokens) == 0 {
+				continue
 			}
+
+			out <- fmt.Sprintf(Yellow, path) + "\n"
+			for _, t := range tokens {
+				out <- fmt.Sprintf("%s:%s", path, strings.Replace(t, query, color, 4))
+			}
+
 		}
 
 		close(out)
@@ -116,24 +138,34 @@ func search(in <-chan string, query string) <-chan string {
 	return out
 }
 
-func searchAll(file *os.File, query []byte) string {
+func min(n, m int) int {
+	if n < m {
+		return n
+	}
+	return m
+}
+func max(n, m int) int {
+	if n > m {
+		return n
+	}
+	return m
+}
+func searchAll(file *os.File, query string) []string {
 	r := bufio.NewReader(file)
 
 	scanner := bufio.NewScanner(r)
-	sb := strings.Builder{}
-	for scanner.Scan() {
-		text := scanner.Text()
+	tokens := make([]string, 0)
 
-		if !strings.Contains(text, string(query)) {
+	for scanner.Scan() {
+		token := strings.TrimSpace(scanner.Text())
+
+		if !strings.Contains(token, query) {
 			continue
 		}
-
-		sb.WriteString("\n  ")
-		sb.WriteString(strings.TrimSpace(text))
-
+		tokens = append(tokens, token)
 	}
 	_ = file.Close()
-	return sb.String()
+	return tokens
 }
 
 func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
