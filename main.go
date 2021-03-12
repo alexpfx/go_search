@@ -4,10 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/urfave/cli/v2"
-	"io"
 	"io/fs"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,7 +13,7 @@ import (
 	"time"
 )
 
-var (
+const (
 	Black   = "\033[1;30m%s\033[0m"
 	Red     = "\033[1;31m%s\033[0m"
 	Green   = "\033[1;32m%s\033[0m"
@@ -24,12 +22,10 @@ var (
 	Magenta = "\033[1;35m%s\033[0m"
 	Teal    = "\033[1;36m%s\033[0m"
 	White   = "\033[1;37m%s\033[0m"
-
-	InfoColor    = "\033[1;34m%s\033[0m"
-	NoticeColor  = "\033[1;36m%s\033[0m"
-	WarningColor = "\033[1;33m%s\033[0m"
-	ErrorColor   = "\033[1;31m%s\033[0m"
-	DebugColor   = "\033[0;36m%s\033[0m"
+)
+var (
+	PathColor      = Red
+	HighlightColor = Yellow
 )
 
 func main() {
@@ -98,24 +94,11 @@ func main() {
 func search(in <-chan string, query string) <-chan string {
 	out := make(chan string, 4)
 
-	color := fmt.Sprintf(Purple, query)
+
 	go func() {
 		for path := range in {
 			file, err := os.Open(path)
 			if err != nil {
-				continue
-			}
-
-			buff := make([]byte, 512)
-			rd := bufio.NewReader(file)
-			_, err = rd.Read(buff)
-			if err == io.EOF {
-				_ = file.Close()
-				continue
-			}
-			contentType := http.DetectContentType(buff)
-			if !strings.HasPrefix(contentType, "text") {
-				_ = file.Close()
 				continue
 			}
 
@@ -127,7 +110,10 @@ func search(in <-chan string, query string) <-chan string {
 
 			out <- fmt.Sprintf(Yellow, path) + "\n"
 			for _, t := range tokens {
-				out <- fmt.Sprintf("%s:%s", path, strings.Replace(t, query, color, 4))
+				out <- fmt.Sprintf("%s: %s",
+					fmt.Sprintf(PathColor, path),
+					strings.Replace(t, query,
+						fmt.Sprintf(HighlightColor, query), 4))
 			}
 
 		}
@@ -157,6 +143,7 @@ func searchAll(file *os.File, query string) []string {
 	tokens := make([]string, 0)
 
 	for scanner.Scan() {
+		fmt.Println("af")
 		token := strings.TrimSpace(scanner.Text())
 
 		if !strings.Contains(token, query) {
@@ -164,6 +151,7 @@ func searchAll(file *os.File, query string) []string {
 		}
 		tokens = append(tokens, token)
 	}
+	fmt.Println(scanner.Err())
 	_ = file.Close()
 	return tokens
 }
@@ -195,8 +183,7 @@ func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
 				return nil
 			}
 
-			if incRegex != nil && !incRegex.MatchString(entry.Name()) {
-				fmt.Println("not regular")
+			if shouldIgnoreExt(filepath.Ext(path)) {
 				return nil
 			}
 
@@ -208,6 +195,17 @@ func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
 	}()
 
 	return out
+}
+
+func shouldIgnoreExt(ext string) bool {
+	ignore := []string{"jar", "tar", "zip", "bin"}
+
+	for _, iext := range ignore {
+		if strings.EqualFold(iext, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 func shouldSkipDir(info fs.DirEntry, all bool) bool {
