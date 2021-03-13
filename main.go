@@ -23,6 +23,7 @@ const (
 	Teal    = "\033[1;36m%s\033[0m"
 	White   = "\033[1;37m%s\033[0m"
 )
+
 var (
 	PathColor      = Red
 	HighlightColor = Yellow
@@ -94,9 +95,9 @@ func main() {
 func search(in <-chan string, query string) <-chan string {
 	out := make(chan string, 4)
 
-
 	go func() {
 		for path := range in {
+			fmt.Println("buscando: ", path)
 			file, err := os.Open(path)
 			if err != nil {
 				continue
@@ -104,38 +105,32 @@ func search(in <-chan string, query string) <-chan string {
 
 			tokens := searchAll(file, query)
 
+			fmt.Println("fechando: ", path)
+			err = file.Close()
+
 			if len(tokens) == 0 {
 				continue
 			}
 
-			out <- fmt.Sprintf(Yellow, path) + "\n"
-			for _, t := range tokens {
-				out <- fmt.Sprintf("%s: %s",
-					fmt.Sprintf(PathColor, path),
-					strings.Replace(t, query,
-						fmt.Sprintf(HighlightColor, query), 4))
-			}
+
+			out <- "encontrou " + path
+			/*
+				out <- fmt.Sprintf(Yellow, path) + "\n"
+				for _, t := range tokens {
+					out <- fmt.Sprintf("%s: %s",
+						fmt.Sprintf(PathColor, path),
+						strings.Replace(t, query,
+							fmt.Sprintf(HighlightColor, query), 4))
+				}
+			*/
 
 		}
-
 		close(out)
 	}()
 
 	return out
 }
 
-func min(n, m int) int {
-	if n < m {
-		return n
-	}
-	return m
-}
-func max(n, m int) int {
-	if n > m {
-		return n
-	}
-	return m
-}
 func searchAll(file *os.File, query string) []string {
 	r := bufio.NewReader(file)
 
@@ -143,7 +138,6 @@ func searchAll(file *os.File, query string) []string {
 	tokens := make([]string, 0)
 
 	for scanner.Scan() {
-		fmt.Println("af")
 		token := strings.TrimSpace(scanner.Text())
 
 		if !strings.Contains(token, query) {
@@ -151,16 +145,29 @@ func searchAll(file *os.File, query string) []string {
 		}
 		tokens = append(tokens, token)
 	}
-	fmt.Println(scanner.Err())
-	_ = file.Close()
+
 	return tokens
+}
+
+func printSize(size int64) string {
+	r := float64(size) / 1024
+	if r < 1024 {
+		return fmt.Sprintf("%2.2fKB", r)
+	}
+	r /= 1024
+	if r < 1024 {
+		return fmt.Sprintf("%2.2fMB", r)
+	}
+
+	r /= 1024
+	return fmt.Sprintf("%2.2fGB", r)
+
 }
 
 func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
 	out := make(chan string, 4)
 
 	go func() {
-
 		_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -186,7 +193,13 @@ func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
 			if shouldIgnoreExt(filepath.Ext(path)) {
 				return nil
 			}
+			info, err := entry.Info()
+			if err != nil {
+				return nil
+			}
 
+
+			fmt.Printf("enviando: %s %s\n", path, printSize(info.Size()))
 			out <- path
 
 			return nil
