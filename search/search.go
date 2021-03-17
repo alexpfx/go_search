@@ -127,6 +127,10 @@ func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
 				return nil
 			}
 
+			if incRegex != nil && !incRegex.MatchString(path){
+				return nil
+			}
+
 			out <- path
 
 
