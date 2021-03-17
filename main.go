@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	downloader2 "github.com/alexpfx/go_search/downloader"
+	"github.com/alexpfx/go_search/extractor"
 	"github.com/alexpfx/go_search/search"
 	"github.com/fatih/color"
 	"github.com/urfave/cli/v2"
@@ -38,6 +40,69 @@ func main() {
 		Name:            "go_search",
 		Usage:           "buscador de texto em arquivos",
 		ArgsUsage:       "<query_string>",
+
+
+		Commands: []*cli.Command{
+			{
+				Name: "gen",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:    "extract",
+						Aliases: []string{"x"},
+						Usage:   "indica que o arquivo obtido via download deve ser extraído",
+						Value:   true,
+					},
+					&cli.StringFlag{Usage: "diretório onde os arquivos serão gravados",
+						Aliases: []string{"d"},
+						Name:    "targetDir",
+						Value:   "/media/sda5/opt/data/large/",
+					},
+					&cli.IntFlag{
+
+						Name:    "size",
+						Usage:   "só realiza o download do arquivos com tamanho maior que <size>MB",
+						Aliases: []string{"s"},
+						Value:   5,
+					}},
+				Usage: "Obtém arquivos texto do site http://www.gutenberg.org para fins de teste",
+				Action: func(c *cli.Context) error {
+					dir := c.String("targetDir")
+					size := c.Int("size")
+
+					baseUrl := "http://www.gutenberg.org/robot/harvest"
+					crawler := downloader2.Crawler{
+						Start: baseUrl,
+						DownloadIf: func(fileUrl string, sizeMb float64) bool {
+							return sizeMb > float64(size)
+						},
+					}
+					ch := crawler.Run()
+
+					downloader := downloader2.Downloader{
+						TargetDir: dir,
+						Channel:   ch,
+					}
+
+					extract := c.Bool("extract")
+
+					downloadCh := downloader.Run()
+
+
+					if extract {
+						ext := extractor.New{Channel: downloadCh}
+						extCh := ext.Run()
+
+						for f := range extCh{
+							log.Println("extraido: ", f)
+						}
+
+					}
+
+					return nil
+
+				},
+			},
+		},
 
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -97,7 +162,7 @@ func main() {
 
 			out := srch.Run()
 
-			for r := range out{
+			for r := range out {
 				printResult(r)
 			}
 
@@ -105,8 +170,6 @@ func main() {
 			return nil
 		},
 	}
-
-
 
 	err := app.Run(os.Args)
 	if err != nil {
