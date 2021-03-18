@@ -55,7 +55,7 @@ func main() {
 					&cli.StringFlag{Usage: "diretório onde os arquivos serão gravados",
 						Aliases: []string{"d"},
 						Name:    "targetDir",
-						Value:   "/media/sda5/opt/data/large/",
+						Value:   "./",
 					},
 					&cli.IntFlag{
 
