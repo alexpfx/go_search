@@ -75,9 +75,8 @@ func scanAndMatch(file *os.File, query string) []string {
 	scanner := bufio.NewScanner(r)
 	lines := make([]string, 0)
 
-
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		line := scanner.Text()
 
 		if !strings.Contains(line, query) {
 			continue
@@ -127,12 +126,11 @@ func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
 				return nil
 			}
 
-			if incRegex != nil && !incRegex.MatchString(path){
+			if incRegex != nil && !incRegex.MatchString(path) {
 				return nil
 			}
 
 			out <- path
-
 
 			return nil
 		})
