@@ -18,6 +18,8 @@ var clCyan = color.New(color.FgHiCyan)
 var clBlue = color.New(color.FgHiBlue)
 var plain bool
 
+var clResult = clBlue.SprintFunc()
+
 func blue(a interface{}) {
 	clOut(clBlue, plain, a)
 }
@@ -28,10 +30,10 @@ func cyan(a interface{}) {
 
 func clOut(color *color.Color, plain bool, a interface{}) {
 	if plain {
-		fmt.Print(a)
+		fmt.Println(a)
 		return
 	}
-	_, _ = color.Print(a)
+	_, _ = color.Println(a)
 }
 
 func main() {
@@ -40,7 +42,6 @@ func main() {
 		Name:            "go_search",
 		Usage:           "buscador de texto em arquivos",
 		ArgsUsage:       "<query_string>",
-
 
 		Commands: []*cli.Command{
 			{
@@ -87,12 +88,11 @@ func main() {
 
 					downloadCh := downloader.Run()
 
-
 					if extract {
 						ext := extractor.New{Channel: downloadCh}
 						extCh := ext.Run()
 
-						for f := range extCh{
+						for f := range extCh {
 							log.Println("extraido: ", f)
 						}
 
@@ -127,6 +127,11 @@ func main() {
 				Value:   false,
 				Usage:   "desabilita cores na saída",
 			},
+			&cli.IntFlag{
+				Name:    "limit",
+				Aliases: []string{"l"},
+				Value:   10,
+			},
 		},
 		HelpName: "go_search",
 		Action: func(c *cli.Context) error {
@@ -136,10 +141,10 @@ func main() {
 				return nil
 			}
 
+			limit := c.Int("limit")
 			plain = c.Bool("plain")
 			query := strings.Join(c.Args().Slice(), " ")
 			root := c.String("directory")
-
 			start := time.Now()
 
 			var incRegex *regexp.Regexp
@@ -163,7 +168,7 @@ func main() {
 			out := srch.Run()
 
 			for r := range out {
-				printResult(r)
+				printResult(limit, r)
 			}
 
 			fmt.Printf("%s\n", time.Since(start))
@@ -177,15 +182,36 @@ func main() {
 	}
 
 }
+func max(j int, k int) int {
+	if j > k {
+		return j
+	}
+	return k
+}
 
-func printResult(r search.Result) {
+func min(j int, k int) int {
+	if j < k {
+		return j
+	}
+	return k
+}
+
+func printResult(limit int, r search.Result) {
 	cyan(r.Path + ": ")
 
-	for i, s := range strings.Split(r.Line, r.Query) {
-		if i != 0 {
-			blue(r.Query)
-		}
-		fmt.Print(s)
+	var printStr string
+	s := r.Line
+	if limit == -1 {
+		printStr = s
+	} else {
+		fstMatch := strings.Index(s, r.Query)
+		lstMatch := strings.LastIndex(s, r.Query)
+
+		left := max(fstMatch-limit, 0)
+		right := min(lstMatch+len(r.Query)+limit, len(s))
+		printStr = s[left:right]
 	}
-	fmt.Println()
+	printStr = strings.ReplaceAll(printStr, r.Query, clResult(r.Query))
+	fmt.Println("  ", printStr)
+
 }
