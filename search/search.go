@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -89,7 +88,7 @@ func scanAndMatch(file *os.File, query string) []string {
 
 type Filter struct {
 	Root     string
-	Include  *regexp.Regexp
+	Include  []string
 	SkipHide bool
 }
 
@@ -97,7 +96,7 @@ func (f Filter) Run() chan string {
 	return filter(f.Root, !f.SkipHide, f.Include)
 }
 
-func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
+func filter(root string, all bool, acceptNames []string) chan string {
 	out := make(chan string, 8)
 
 	go func() {
@@ -126,7 +125,7 @@ func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
 				return nil
 			}
 
-			if incRegex != nil && !incRegex.MatchString(path) {
+			if !shouldIncludeFile(entry.Name(), acceptNames) {
 				return nil
 			}
 
@@ -138,6 +137,18 @@ func filter(root string, all bool, incRegex *regexp.Regexp) chan string {
 	}()
 
 	return out
+}
+
+func shouldIncludeFile(name string, accept []string) bool {
+	if len(accept) == 0 {
+		return true
+	}
+	for _, s := range accept {
+		if strings.Contains(name, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func shouldIgnoreExt(ext string) bool {

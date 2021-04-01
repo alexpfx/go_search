@@ -9,7 +9,6 @@ import (
 	"github.com/urfave/cli/v2"
 	"log"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -20,21 +19,7 @@ var plain bool
 
 var clResult = clBlue.SprintFunc()
 
-func blue(a interface{}) {
-	clOut(clBlue, plain, a)
-}
-
-func cyan(a interface{}) {
-	clOut(clCyan, plain, a)
-}
-
-func clOut(color *color.Color, plain bool, a interface{}) {
-	if plain {
-		fmt.Println(a)
-		return
-	}
-	_, _ = color.Println(a)
-}
+var clPathResult = clCyan.SprintFunc()
 
 func main() {
 	app := &cli.App{
@@ -116,10 +101,14 @@ func main() {
 				Usage: "inclui na busca diretórios invisíveis",
 				Value: false,
 			},
-			&cli.StringFlag{
+			&cli.StringSliceFlag{
 				Name:    "include",
 				Aliases: []string{"i"},
-				Usage:   "include pattern: se especificado irá incluir na busca apenas arquivos que satisfaçam o pattern",
+				Usage: `busca o texto apenas que contenham uma parte da string no nome. 
+					exemplos de uso: 
+						-i txt							
+						-i txt -i java -i main.go					
+				`,
 			},
 			&cli.BoolFlag{
 				Name:    "plain",
@@ -130,7 +119,7 @@ func main() {
 			&cli.IntFlag{
 				Name:    "limit",
 				Aliases: []string{"l"},
-				Value:   10,
+				Value:   20,
 			},
 		},
 		HelpName: "go_search",
@@ -147,15 +136,11 @@ func main() {
 			root := c.String("directory")
 			start := time.Now()
 
-			var incRegex *regexp.Regexp
-			inc := c.String("include")
-			if inc != "" {
-				incRegex = regexp.MustCompile(inc)
-			}
+			inc := c.StringSlice("include")
 
 			filter := search.Filter{
 				Root:     root,
-				Include:  incRegex,
+				Include:  inc,
 				SkipHide: !c.Bool("all"),
 			}
 			ch := filter.Run()
@@ -197,7 +182,7 @@ func min(j int, k int) int {
 }
 
 func printResult(limit int, r search.Result) {
-	cyan(r.Path + ": ")
+	fmt.Println(clPathResult(r.Path) + ": ")
 
 	var printStr string
 	s := r.Line
